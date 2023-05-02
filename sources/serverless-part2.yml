@@ -1,0 +1,175 @@
+service: abetest
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: python3.9
+  region: ap-northeast-1
+  deploymentBucket:
+    name: abetest-deploymentbucket
+
+#環境変数を設定
+custom:
+  LambdaName: cost-notification
+  StatemachineName: LambdaStatemachine
+
+#Serverless Step Functionsプラグインの実装
+plugins:
+  - serverless-step-functions
+
+functions:
+  cost-notification:
+    name: ${self:custom.LambdaName}  #customセクションで設定した環境変数
+    handler: cost.handler
+    environment:
+        Fn::GetAtt: [CostSns, TopicArn]
+    role: LambdaExeRole
+
+#StepFunctionsの作成
+stepFunctions:
+  stateMachines:
+    costnotification: 
+      id: CostNotificationStateMachine
+      name: ${self:custom.StatemachineName}
+      role: !GetAtt StepfunctionExeRole.Arn
+      definition:
+        StartAt: Lambda Invoke
+        States:
+          Lambda Invoke:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              FunctionName: 
+                Fn::GetAtt: [cost-notification, Arn]
+            End: true
+      #Loggroupの関連付け
+      loggingConfig: 
+        level: ALL
+        includeExecutionData: true
+        destinations:
+          - Fn::GetAtt: [StepfunctionsLoggroup, Arn]
+
+resources:
+  Resources:
+    #SNSの設定
+    CostSns:
+      Type: AWS::SNS::Topic
+      Properties: 
+        TopicName: cost-notification
+        DisplayName: Cost notification
+        Subscription: 
+          - Endpoint: xxxxxxxxxxxxxx@icloud.com
+            Protocol: email
+    #SteoFunctionsのロググループ作成
+    StepfunctionsLoggroup:
+      Type: AWS::Logs::LogGroup
+      Properties: 
+        LogGroupName: ${self:custom.StatemachineName}
+    #Lambdaの実行ロール
+    LambdaExeRole:
+      Type: AWS::IAM::Role
+      Properties:
+        Path: /
+        RoleName: costnotification
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action: sts:AssumeRole 
+        #Cloudwatch Logsポリシー
+        Policies:
+          - PolicyName: lambda-logging
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - logs:CreateLogGroup
+                  Resource:
+                    - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*
+                - Effect: Allow
+                  Action:
+                    - logs:CreateLogStream
+                    - logs:PutLogEvents
+                  Resource:
+                    - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:/aws/lambda/${self:custom.LambdaName}:*
+          #SNSポリシー
+          - PolicyName: lambda-sns
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - sns:Publish
+                  Resource:
+                    - !GetAtt CostSns.TopicArn
+          #CostExplolerポリシー
+          - PolicyName: lambda-CE
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ce:GetCostAndUsage
+                  Resource:
+                    - '*'
+    #StepFunctionsを呼び出すロール
+    StepfunctionStartRole:
+      Type: AWS::IAM::Role
+      Properties:
+        Path: /
+        RoleName: stepfunction-eventbridge
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - events.amazonaws.com
+              Action: sts:AssumeRole      
+        Policies:
+          - PolicyName: stepfunction-eventbridge
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - states:StartExecution
+                  Resource: !GetAtt CostNotificationStateMachine.Arn
+    #Lambdを呼び出すロール
+    StepfunctionExeRole:
+      Type: AWS::IAM::Role
+      Properties:
+        Path: /
+        RoleName: stepfunction-invoke-lambda
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - states.amazonaws.com
+              Action: sts:AssumeRole      
+        Policies:
+          - PolicyName: stepfunction-invoke-lambda
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - lambda:InvokeFunction
+                  Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${self:custom.LambdaName}
+                  
+    #EventBridgeの作成
+    StepfunctionSchedule:
+      Type: AWS::Events::Rule
+      Properties:
+        Name: cost-notification
+        ScheduleExpression: "cron(0 3 * * ? *)"
+        Targets: 
+          - Arn: !Ref CostNotificationStateMachine
+            Id: ${self:custom.StatemachineName}         
+            RoleArn: !GetAtt StepfunctionStartRole.Arn

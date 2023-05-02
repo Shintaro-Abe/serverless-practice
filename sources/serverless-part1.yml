@@ -1,0 +1,113 @@
+service: abetest
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: python3.9
+  region: ap-northeast-1
+  deploymentBucket:
+    name: abetest-deploymentbucket
+  #lambdaの実行ロール
+  iam:
+    role:
+      name: costnotification
+      statements:
+        #SNSポリシー
+        - Effect: Allow
+          Action:
+            - sns:Publish
+          Resource:
+            - !GetAtt CostSns.TopicArn
+        #CostExplolerポリシー
+        - Effect: Allow
+          Action:
+            - ce:GetCostAndUsage
+          Resource:
+            - '*'
+
+#環境変数を設定
+custom:
+  LambdaName: cost-notification
+  StatemachineName: LambdaStatemachine
+
+#Serverless Step Functionsプラグインの実装
+plugins:
+  - serverless-step-functions
+
+functions:
+  cost-notification:
+    name: ${self:custom.LambdaName}  #customセクションで設定した環境変数
+    handler: cost.handler
+    environment:
+        Fn::GetAtt: [CostSns, TopicArn]
+
+#StepFunctionsの作成
+stepFunctions:
+  stateMachines:
+    costnotification:    #Stepfunctionsの実行に必要なポリシーをアタッチしたロールは自動で作成
+      id: CostNotificationStateMachine
+      name: ${self:custom.StatemachineName}
+      definition:
+        StartAt: Lambda Invoke
+        States:
+          Lambda Invoke:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              FunctionName: 
+                Fn::GetAtt: [cost-notification, Arn]
+            End: true
+      #Eventbridgeの作成
+      events:
+        - schedule:
+            name: cost-notification
+            rate: cron(0 3 * * ? *)
+            role: !GetAtt StepfunctionStartRole.Arn
+      #Loggroupの関連付け
+      loggingConfig: 
+        level: ALL
+        includeExecutionData: true
+        destinations:
+          - Fn::GetAtt: [StepfunctionsLoggroup, Arn]
+
+resources:
+  Resources:
+    #SNSの設定
+    CostSns:
+      Type: AWS::SNS::Topic
+      Properties: 
+        TopicName: cost-notification
+        DisplayName: Cost notification
+        Subscription: 
+          - Endpoint: xxxxxxxxxxxxxx@icloud.com
+            Protocol: email
+
+    #SteoFunctionsのロググループ作成
+    StepfunctionsLoggroup:
+      Type: AWS::Logs::LogGroup
+      Properties: 
+        LogGroupName: ${self:custom.StatemachineName}
+
+    #StepFunctionsを呼び出すロール
+    StepfunctionStartRole:
+      Type: AWS::IAM::Role
+      Properties:
+        Path: /
+        RoleName: stepfunction-eventbridge
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - events.amazonaws.com
+              Action: sts:AssumeRole      
+        Policies:
+          - PolicyName: stepfunction-eventbridge
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - states:StartExecution
+                  Resource: !GetAtt CostNotificationStateMachine.Arn
