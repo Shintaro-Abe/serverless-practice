@@ -2,7 +2,7 @@
 ## Refferemce article
 Zennに投稿した、「Serverless Frameworkの基本的な使い方」に掲載したコードを収録したリポジトリ。
 
-<a href="https://zenn.dev/lifewithpiano/articles/codefamily_cloudformation"><img src="images/serverless_practice_zenn.png" width="50%">
+<a href="https://zenn.dev/lifewithpiano/articles/serverlessframework2304"><img src="images/serverless_practice_zenn.png" width="50%">
 
 ## Summary
 毎日12時にEventbridgeでAWSの請求額を取得するLambda関数を起動させ、SNSから通知メールを送信するシステム。
