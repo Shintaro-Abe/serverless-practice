@@ -17,7 +17,7 @@ serverless stepfunctionsプラグインをインストール。
 sudo npm install --save-dev serverless-step-functions
 ```
 
-## Regarding source code
+## Regarding source codes
 
 #### serverless.yml 【part.1】
 
