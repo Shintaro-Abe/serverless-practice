@@ -11,6 +11,7 @@ Serverless Frameworkを使用するので、あえてStepFunctionsを使用し�
 <img src="images/EventBridge.drawio.png" width="50%">
 
 * __プラグインのインストール__
+
 serverless stepfunctionsプラグインをインストール。
 尚、resourceセクションにCloudFormation構文で記述する方法でも作成可能。
 ```
